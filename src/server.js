@@ -1,20 +1,24 @@
 const express = require("express");
 const connectDb = require("./config/database");
-const user = require("./models/user.model");
+const User = require("./models/user.model");
 const { validateSignUpData } = require("./utils/validation");
 const bcrypt = require("bcrypt");
+const cookieparser = require("cookie-parser");
+const jwt = require("jsonwebtoken");
+const { userAuth } = require("./middlewares/auth");
 
 const app = express();
-app.use(express.json());
+app.use(express.json()); // middleware to parse JSON data
+app.use(cookieparser());
 
+// Sign up route
 app.post("/signup", async (req, res) => {
   try {
-    //validation of data
     validateSignUpData(req.body);
 
-    const {firstName,lastName,emailId, password } = req.body;
+    const { firstName, lastName, emailId, password } = req.body;
 
-    //Encrypt the password
+    // Encrypt password
     const passwordHash = await bcrypt.hash(password, 10);
     req.body.password = passwordHash;
 
@@ -24,6 +28,7 @@ app.post("/signup", async (req, res) => {
       emailId,
       password: passwordHash,
     });
+
     await newUser.save();
     res.send("User added successfully");
   } catch (err) {
@@ -31,34 +36,67 @@ app.post("/signup", async (req, res) => {
   }
 });
 
-app.post("/login" , async (req,res) =>{
-  try{
-    const {emailId, password} = req.body;
-    const user = await User.findOne({emailId:emailId});
+// Login route
+app.post("/login", async (req, res) => {
+  try {
+    const { emailId, password } = req.body;
+    const user = await User.findOne({ emailId });
 
-    if(!user){
-      throw new Error("Email id is not valid")
+    if (!user) {
+      throw new Error("Email id is not valid");
     }
-    const isPasswordValid = await bcrypt.compare(password , user.password);
 
-    if(isPasswordValid){
-      res.send("login successfull")
-    }else{
-      throw new Error("login failed")
+    const isPasswordValid = await user.validatepassword(password);
+
+    if (isPasswordValid) {
+      //create a jwt token
+      const token = await user.getJwt();
+
+      // console.log(token);
+
+      //add token in cookie and send response to client
+      res.cookie("token", token ,{expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) } );
+
+      res.send("Login successful");
+    } else {
+      throw new Error("Login failed: Incorrect password");
     }
-    
-
+  } catch (err) {
+    res.status(400).send("Error: " + err.message);
   }
-  catch(err){  
-    res.status(400).send("Error" + err.message)
+});
+//profile
+app.get("/profile", userAuth, async (req, res) => {
+  try {
+    // const cookies = req.cookies;
+    // const { token } = cookies;
 
+    // if (!token) {
+    //   throw new Error("invalid token");
+    // }
+
+    // const decodedMessage = await jwt.verify(token, "Ankitkumarjha@123");
+    // console.log(decodedMessage);
+
+    // const { _id } = decodedMessage;
+    // console.log("the logged in user is " + _id);
+
+    const user = req.user;
+   
+
+    // console.log(cookies);
+    res.send(user);
+    // to read a cookie we need cookie parser as it parse
+  } catch (err) {
+    res.status(400).send("unabale to fetch the profile " + err.message);
   }
-})
+});
 
+// Get user by email
 app.get("/user", async (req, res) => {
   const userEmail = req.body.emailId;
   try {
-    const foundUser = await User.findOne({ email: userEmail });
+    const foundUser = await User.findOne({ emailId: userEmail });
     if (!foundUser) return res.status(404).send("User not found");
     res.status(200).json(foundUser);
   } catch (err) {
@@ -66,33 +104,28 @@ app.get("/user", async (req, res) => {
   }
 });
 
-//feed api
+// Feed - get all users
 app.get("/feed", async (req, res) => {
-  try{
+  try {
     const users = await User.find({});
     res.send(users);
+  } catch (err) {
+    res.status(400).send("Something went wrong: " + err.message);
   }
-  catch(err){
-    res.status(400).send("something went wrong: " + err.message); 
-  }
-})
+});
 
-//delete api
-app.delete("/user/", async (req, res) => {
-  const userId  = req.body.userId;
-  try{
-    const user =  await User.findByIdAndDelete({_id:userId});
-    // const user =  await User.findByIdAndDelete(userId);
+// Delete user by ID
+app.delete("/user", async (req, res) => {
+  const userId = req.body.userId;
+  try {
+    await User.findByIdAndDelete(userId);
     res.send("User deleted successfully");
+  } catch (err) {
+    res.status(400).send("Something went wrong: " + err.message);
   }
-  catch(err){
-    res.status(400).send("something went wrong: " + err.message);
-  }
-  
-})
+});
 
-
-//updating user details
+// Update user details
 app.patch("/user/:userId", async (req, res) => {
   const userId = req.params?.userId;
   const data = req.body;
@@ -122,11 +155,17 @@ app.patch("/user/:userId", async (req, res) => {
   }
 });
 
+// Health check route
+app.get("/health", (req, res) => {
+  res.send("Server is healthy and running");
+});
+
+// Start the server
 connectDb()
   .then(() => {
     console.log("Database connection established successfully...");
-    app.listen(777, () => {
-      console.log("Server is listening on port 777");
+    app.listen(7777, () => {
+      console.log("Server is listening on port 7777");
     });
   })
   .catch((err) => {

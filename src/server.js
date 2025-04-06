@@ -46,7 +46,8 @@ app.post("/login", async (req, res) => {
       throw new Error("Email id is not valid");
     }
 
-    const isPasswordValid = await user.validatepassword(password);
+    const isPasswordValid = await user.validatePassword(password);
+
 
     if (isPasswordValid) {
       //create a jwt token
